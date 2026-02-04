@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Triple Space Translate",
+  "version": "0.2.0",
+  "description": "Translate Chinese to English in Monaco by pressing space three times.",
+  "background": {
+    "service_worker": "sw.js"
+  },
+  "permissions": [
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://*.solve.it.com/*",
+    "http://127.0.0.1:11434/*",
+    "http://localhost:11434/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://*.solve.it.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["injected.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
