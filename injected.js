@@ -103,7 +103,7 @@
   installMonacoHooks();
 
   window.addEventListener('message', (event) => {
-    if (event.source !== window) {
+    if (event.source !== window || event.origin !== location.origin) {
       return;
     }
     const data = event.data || {};
@@ -209,7 +209,7 @@
           model: DEFAULT_MODEL,
           endpoint: DEFAULT_ENDPOINT,
         },
-        '*'
+        location.origin
       );
   };
 

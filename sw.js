@@ -42,9 +42,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     length: message && message.text ? message.text.length : 0,
   });
 
-  const endpoint = typeof message.endpoint === 'string' && message.endpoint
-    ? message.endpoint
-    : DEFAULT_ENDPOINT;
+  const endpoint = DEFAULT_ENDPOINT;
   const text = typeof message.text === 'string' ? message.text : '';
 
   if (!text.trim()) {

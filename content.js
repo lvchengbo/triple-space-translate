@@ -4,7 +4,7 @@ console.info('[Triple Space Translate] content script ready', location.href);
 requestInjection();
 
 window.addEventListener('message', (event) => {
-  if (event.source !== window) {
+  if (event.source !== window || event.origin !== location.origin) {
     return;
   }
 
@@ -21,8 +21,6 @@ window.addEventListener('message', (event) => {
     {
       type: 'translate',
       text: data.text,
-      model: data.model,
-      endpoint: data.endpoint,
     },
     (response) => {
       if (chrome.runtime.lastError) {
@@ -40,7 +38,7 @@ window.addEventListener('message', (event) => {
         text: response && response.text ? response.text : '',
         error: response && response.error ? response.error : '',
       };
-      window.postMessage(payload, '*');
+      window.postMessage(payload, location.origin);
     }
   );
 });
