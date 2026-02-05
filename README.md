@@ -24,7 +24,7 @@ Press a 4th time (still rapid) to re-translate.
 1. Install and start [Ollama](https://ollama.com)
 2. Pull a model:
    ```
-   ollama pull deepseek-r1:14b
+   ollama pull translategemma:4b
    ```
 3. If Ollama blocks extension requests, allow all origins:
    ```
@@ -46,13 +46,12 @@ Edit `injected.js` to adjust:
 | Constant | Default | Description |
 |----------|---------|-------------|
 | `MAX_INTERVAL_MS` | `200` | Max ms between each space press |
-| `MIN_CHINESE_CHARS` | `1` | Minimum Chinese characters to trigger |
 
 Edit `sw.js` to adjust:
 
 | Constant | Default | Description |
 |----------|---------|-------------|
-| `DEFAULT_MODEL` | `deepseek-r1:14b` | Fallback model if auto-detect fails |
+| `DEFAULT_MODEL` | `translategemma:4b` | Fallback model if auto-detect fails |
 | `DEFAULT_ENDPOINT` | `http://127.0.0.1:11434/api/generate` | Ollama API endpoint |
 | `REQUEST_TIMEOUT_MS` | `30000` | Request timeout in ms |
 
