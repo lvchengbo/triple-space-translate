@@ -7,7 +7,7 @@
   const SOURCE = 'triple-space-translate';
   const DEFAULT_MODEL = '';
   const DEFAULT_ENDPOINT = 'http://127.0.0.1:11434/api/generate';
-  const MAX_INTERVAL_MS = 650;
+  const MAX_INTERVAL_MS = 200;
   const MIN_CHINESE_CHARS = 1;
 
   const DEBUG = localStorage.getItem('tstDebug') === '1';
@@ -130,17 +130,7 @@
     }
   });
 
-  const handledEvents = new WeakSet();
-
   const handleKey = (event) => {
-    if (handledEvents.has(event)) {
-      return;
-    }
-    handledEvents.add(event);
-      if (inFlight) {
-        return;
-      }
-
       if (event.isComposing || event.key === 'Process') {
         resetCounter();
         return;
@@ -177,11 +167,9 @@
       lastSpaceAt = now;
       debug('space', { count: spaceCount, target: event.target });
 
-      if (spaceCount !== 3) {
+      if (spaceCount < 3) {
         return;
       }
-
-      spaceCount = 0;
       event.preventDefault();
       event.stopPropagation();
 
@@ -213,10 +201,7 @@
       );
   };
 
-  window.addEventListener('keydown', handleKey, true);
   document.addEventListener('keydown', handleKey, true);
-  window.addEventListener('keyup', handleKey, true);
-  document.addEventListener('keyup', handleKey, true);
 
   function resetCounter() {
     spaceCount = 0;
