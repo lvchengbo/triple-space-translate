@@ -1,5 +1,5 @@
 const DEFAULT_ENDPOINT = 'http://127.0.0.1:11434/api/generate';
-const DEFAULT_MODEL = 'deepseek-r1:14b';
+const DEFAULT_MODEL = 'translategemma:4b';
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 30000;
 
