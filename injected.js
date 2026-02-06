@@ -8,6 +8,7 @@
   const DEFAULT_MODEL = '';
   const DEFAULT_ENDPOINT = 'http://127.0.0.1:11434/api/generate';
   const MAX_INTERVAL_MS = 200;
+  const MIN_LOADING_MS = 700;
 
   const DEBUG = localStorage.getItem('tstDebug') === '1';
   const debug = (...args) => {
@@ -19,64 +20,122 @@
   let inFlight = false;
   let activeEditor = null;
   const editorByNode = new WeakMap();
-  let spinnerEl = null;
+  let loadingEditorRoot = null;
+  let loadingStartedAt = 0;
+  let loadingSettleTimer = null;
+  let loadingTargetLines = [];
+  let loadingTargetSpans = [];
 
-  function showSpinner(editorRoot) {
-    hideSpinner();
-    const anchor = editorRoot || document.querySelector('.monaco-editor');
-    if (!anchor) return;
-
-    const lines = anchor.querySelectorAll('.view-lines .view-line');
-    let lastLine = null;
-    if (lines?.length) {
-      for (let i = lines.length - 1; i >= 0; i--) {
-        const text = (lines[i].textContent || '').trim();
-        if (text) { lastLine = lines[i]; break; }
-      }
-    }
-
-    const el = document.createElement('div');
-    el.className = 'tst-spinner';
-    el.innerHTML = '<div class="tst-dot"></div><div class="tst-dot"></div><div class="tst-dot"></div>';
-
-    if (lastLine) {
-      const editorRect = anchor.getBoundingClientRect();
-      const lastSpan = lastLine.querySelector('span:last-child') || lastLine;
-      const spanRect = lastSpan.getBoundingClientRect();
-      el.style.top = (spanRect.top - editorRect.top + (spanRect.height - 6) / 2) + 'px';
-      el.style.left = (spanRect.right - editorRect.left + 8) + 'px';
-    }
-
-    anchor.appendChild(el);
-    spinnerEl = el;
+  function clearLoadingSettleTimer() {
+    if (!loadingSettleTimer) return;
+    clearTimeout(loadingSettleTimer);
+    loadingSettleTimer = null;
   }
 
-  function hideSpinner() { spinnerEl?.remove(); spinnerEl = null; }
+  function showLoadingIndicator(editorRoot) {
+    hideLoadingIndicator();
+    const anchor = editorRoot || document.querySelector('.monaco-editor');
+    if (!anchor) return;
+    const lines = [...anchor.querySelectorAll('.view-lines .view-line')];
+    loadingTargetLines = lines.filter((line) => hanRegex.test(line.textContent || ''));
+    if (!loadingTargetLines.length) {
+      loadingTargetLines = lines.filter((line) => (line.textContent || '').trim());
+    }
+    const spans = loadingTargetLines.flatMap((line) => [...line.querySelectorAll('span')]);
+    loadingTargetSpans = spans.filter((span) => (span.textContent || '').trim());
+    loadingTargetLines.forEach((line) => line.classList.add('tst-translating-line'));
+    loadingTargetSpans.forEach((span) => span.classList.add('tst-translating-target'));
+    loadingEditorRoot = anchor;
+    loadingStartedAt = Date.now();
+  }
 
-  (function injectSpinnerStyles() {
+  function hideLoadingIndicator() {
+    if (!loadingEditorRoot) return;
+    loadingTargetLines.forEach((line) => line.classList.remove('tst-translating-line'));
+    loadingTargetSpans.forEach((span) => span.classList.remove('tst-translating-target'));
+    loadingTargetLines = [];
+    loadingTargetSpans = [];
+    loadingEditorRoot = null;
+    loadingStartedAt = 0;
+  }
+
+  function applyTranslationResult(data) {
+    inFlight = false;
+    hideLoadingIndicator();
+
+    if (!data.ok || !data.text) return;
+
+    const target = resolveTarget();
+    if (!target) return;
+
+    if (target.editor) {
+      tryReplaceEditorValue(target.editor, data.text);
+    } else if (target.model) {
+      target.model.setValue(data.text);
+    }
+  }
+
+  (function injectLoadingStyles() {
     const style = document.createElement('style');
     style.textContent = `
-      .tst-spinner {
+      .tst-translating-line {
+        position: relative;
+      }
+      .tst-translating-line::after {
+        content: '';
         position: absolute;
-        display: flex;
-        gap: 3px;
-        align-items: center;
-        z-index: 9999;
+        inset: 0;
         pointer-events: none;
+        background-image: linear-gradient(
+          90deg,
+          rgba(0, 0, 0, 0) 43%,
+          rgba(0, 0, 0, 0.1) 48%,
+          rgba(255, 255, 255, 0.42) 50%,
+          rgba(0, 0, 0, 0.1) 52%,
+          rgba(0, 0, 0, 0) 57%
+        );
+        background-size: 240% 100%;
+        background-position: 150% 0;
+        background-repeat: no-repeat;
+        animation: tst-line-sweep 1.35s ease-in-out infinite;
       }
-      .tst-dot {
-        width: 6px;
-        height: 6px;
-        border-radius: 50%;
-        background: #e87;
-        opacity: 0.3;
-        animation: tst-pulse 1s ease-in-out infinite;
+      .tst-translating-target {
+        background-image:
+          linear-gradient(0deg, currentColor, currentColor),
+          linear-gradient(
+            90deg,
+            rgba(255, 255, 255, 0) 46%,
+            rgba(255, 255, 255, 1) 50%,
+            rgba(255, 255, 255, 0) 54%
+          );
+        background-size: 100% 100%, 320% 100%;
+        background-repeat: no-repeat;
+        background-position: 0 0, 170% 0;
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: inherit !important;
+        -webkit-text-fill-color: transparent;
+        text-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
+        animation: tst-text-sweep 1.35s ease-in-out infinite;
+        will-change: background-position;
       }
-      .tst-dot:nth-child(2) { animation-delay: 0.15s; }
-      .tst-dot:nth-child(3) { animation-delay: 0.3s; }
-      @keyframes tst-pulse {
-        0%, 100% { opacity: 0.3; transform: scale(1); }
-        50% { opacity: 1; transform: scale(1.3); }
+      @keyframes tst-line-sweep {
+        0% { background-position: 150% 0; }
+        100% { background-position: -150% 0; }
+      }
+      @keyframes tst-text-sweep {
+        0% { background-position: 0 0, 170% 0; }
+        100% { background-position: 0 0, -170% 0; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .tst-translating-line::after {
+          animation: none;
+          background-position: 0 0;
+        }
+        .tst-translating-target {
+          animation: none;
+          background-position: 0 0, 0 0;
+        }
       }
     `;
     document.head.appendChild(style);
@@ -99,22 +158,26 @@
     const data = event.data || {};
     if (data.source !== SOURCE || data.type !== 'translation') return;
 
-    inFlight = false;
-    hideSpinner();
-
-    if (!data.ok || !data.text) return;
-
-    const target = resolveTarget();
-    if (!target) return;
-
-    if (target.editor) {
-      tryReplaceEditorValue(target.editor, data.text);
-    } else if (target.model) {
-      target.model.setValue(data.text);
+    clearLoadingSettleTimer();
+    const elapsed = loadingStartedAt ? Date.now() - loadingStartedAt : MIN_LOADING_MS;
+    const waitMs = Math.max(0, MIN_LOADING_MS - elapsed);
+    if (!waitMs) {
+      applyTranslationResult(data);
+      return;
     }
+
+    loadingSettleTimer = setTimeout(() => {
+      loadingSettleTimer = null;
+      applyTranslationResult(data);
+    }, waitMs);
   });
 
   function triggerTranslation(editorRoot) {
+    if (inFlight) {
+      debug('skip: translation already in flight');
+      return;
+    }
+    clearLoadingSettleTimer();
     const target = resolveTarget(editorRoot);
     const modelText = target?.model?.getValue() || '';
     const domText = editorRoot ? extractTextFromDom(editorRoot) : '';
@@ -124,7 +187,7 @@
       return;
     }
     inFlight = true;
-    showSpinner(editorRoot);
+    showLoadingIndicator(editorRoot);
     debug('translate request', { length: text.length });
     window.postMessage(
       { source: SOURCE, type: 'translate', text, model: DEFAULT_MODEL, endpoint: DEFAULT_ENDPOINT },

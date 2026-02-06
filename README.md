@@ -88,7 +88,7 @@ injected.js (MAIN world)  ─── window.postMessage ───>  content.js (I
 | `manifest.json` | Extension config and permissions |
 | `sw.js` | Service worker — Ollama API calls, model detection |
 | `content.js` | Message bridge between page and service worker |
-| `injected.js` | Monaco editor hooks, triple-space detection, spinner UI |
+| `injected.js` | Monaco editor hooks, triple-space detection, shimmer loading UI |
 
 ## License
 
