@@ -6,6 +6,11 @@ const REQUEST_TIMEOUT_MS = 30000;
 let cachedModels = [];
 let cachedAt = 0;
 
+chrome.commands.onCommand.addListener((command) => {
+  if (command === 'reload') {
+    chrome.runtime.reload();
+  }
+});
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message && message.type === 'inject') {

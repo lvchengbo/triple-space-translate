@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#4338CA"/>
+      <stop offset="100%" stop-color="#7C3AED"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="128" height="128" rx="28" fill="url(#bg)"/>
+
+  <!-- Upper arrow: left → right (source → target) -->
+  <path d="M26 44 L82 44" stroke="white" stroke-width="7" stroke-linecap="round"/>
+  <path d="M72 34 L82 44 L72 54" stroke="white" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+
+  <!-- Lower arrow: right → left -->
+  <path d="M102 70 L46 70" stroke="white" stroke-width="7" stroke-linecap="round"/>
+  <path d="M56 60 L46 70 L56 80" stroke="white" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+
+  <!-- Three dots (triple space trigger) -->
+  <circle cx="40" cy="104" r="7" fill="white" opacity="0.85"/>
+  <circle cx="64" cy="104" r="7" fill="white" opacity="0.85"/>
+  <circle cx="88" cy="104" r="7" fill="white" opacity="0.85"/>
+</svg>
