@@ -8,7 +8,7 @@ Built for [solve.it.com](https://solve.it.com).
 
 1. Type Chinese text in a Monaco editor
 2. Rapidly press **Space** three times (within 200ms each)
-3. A dot-pulse animation appears while translating
+3. A shimmer light-sweep animation appears on translatable Monaco text while translating
 4. The editor content is replaced with the English translation
 
 Press a 4th time (still rapid) to re-translate.
@@ -46,6 +46,7 @@ Edit `injected.js` to adjust:
 | Constant | Default | Description |
 |----------|---------|-------------|
 | `MAX_INTERVAL_MS` | `200` | Max ms between each space press |
+| `MIN_LOADING_MS` | `700` | Minimum shimmer visibility time in ms |
 
 Edit `sw.js` to adjust:
 
@@ -68,6 +69,11 @@ Manually trigger translation:
 ```js
 __tstTranslateNow()
 ```
+
+## Troubleshooting
+
+- `Extension context invalidated`: the extension was reloaded while the page still had an old content script. Reload the page to attach the latest extension context.
+- Shimmer is hard to notice: current default keeps it visible for at least `700ms` (`MIN_LOADING_MS` in `injected.js`).
 
 ## Architecture
 
