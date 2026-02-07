@@ -8,7 +8,8 @@
   const DEFAULT_MODEL = '';
   const DEFAULT_ENDPOINT = 'http://127.0.0.1:11434/api/generate';
   const MAX_INTERVAL_MS = 200;
-  const MIN_LOADING_MS = 700;
+  const MIN_LOADING_MS = 1200;
+  const SHIMMER_SWEEP_SECONDS = 1.45;
 
   const DEBUG = localStorage.getItem('tstDebug') === '1';
   const debug = (...args) => {
@@ -25,6 +26,7 @@
   let loadingSettleTimer = null;
   let loadingTargetLines = [];
   let loadingTargetSpans = [];
+  let pendingTranslationTarget = null;
 
   function clearLoadingSettleTimer() {
     if (!loadingSettleTimer) return;
@@ -32,29 +34,154 @@
     loadingSettleTimer = null;
   }
 
+  function parseCssColor(value) {
+    const parts = String(value || '').match(/[\d.]+/g);
+    if (!parts || parts.length < 3) return null;
+    const r = Number(parts[0]);
+    const g = Number(parts[1]);
+    const b = Number(parts[2]);
+    const a = parts.length >= 4 ? Number(parts[3]) : 1;
+    if (![r, g, b, a].every(Number.isFinite)) return null;
+    return {
+      r: Math.max(0, Math.min(255, Math.round(r))),
+      g: Math.max(0, Math.min(255, Math.round(g))),
+      b: Math.max(0, Math.min(255, Math.round(b))),
+      a: Math.max(0, Math.min(1, a)),
+    };
+  }
+
+  function toRgbString(color) {
+    return `rgb(${color.r}, ${color.g}, ${color.b})`;
+  }
+
+  function toRgbaString(color, alpha) {
+    const safeAlpha = Number.isFinite(alpha) ? Math.max(0, Math.min(1, alpha)) : 1;
+    return `rgba(${color.r}, ${color.g}, ${color.b}, ${safeAlpha})`;
+  }
+
+  function mixRgb(from, to, weight) {
+    const ratio = Number.isFinite(weight) ? Math.max(0, Math.min(1, weight)) : 0.5;
+    return {
+      r: Math.round(from.r + (to.r - from.r) * ratio),
+      g: Math.round(from.g + (to.g - from.g) * ratio),
+      b: Math.round(from.b + (to.b - from.b) * ratio),
+      a: 1,
+    };
+  }
+
+  function resolveSpanBaseColor(span) {
+    const candidates = [
+      span,
+      span?.parentElement,
+      span?.closest?.('.view-line'),
+      document.body,
+      document.documentElement,
+    ].filter(Boolean);
+
+    for (const node of candidates) {
+      const parsed = parseCssColor(getComputedStyle(node).color);
+      if (parsed && parsed.a > 0.05) {
+        return { r: parsed.r, g: parsed.g, b: parsed.b, a: 1 };
+      }
+    }
+
+    return { r: 190, g: 200, b: 218, a: 1 };
+  }
+
+  function resolveSpanShimmerPalette(span) {
+    const base = resolveSpanBaseColor(span);
+    const highlight = mixRgb(base, { r: 255, g: 255, b: 255, a: 1 }, 0.62);
+    const mid = mixRgb(base, highlight, 0.45);
+    return {
+      base,
+      mid,
+      highlight,
+      glowStrong: toRgbaString(highlight, 0.45),
+      glowSoft: toRgbaString(highlight, 0.2),
+    };
+  }
+
+  function collectLineShimmerSpans(line) {
+    const lineRect = line.getBoundingClientRect();
+    const entries = [...line.querySelectorAll('span')].map((span) => {
+      const text = span.textContent || '';
+      const rect = span.getBoundingClientRect();
+      return { span, text, rect };
+    }).filter((entry) => {
+      return entry.text.trim() && entry.rect.width > 0 && entry.rect.height > 0;
+    });
+    if (!entries.length) return [];
+
+    let left = Infinity;
+    let right = -Infinity;
+    for (const entry of entries) {
+      left = Math.min(left, entry.rect.left - lineRect.left);
+      right = Math.max(right, entry.rect.right - lineRect.left);
+    }
+    if (!Number.isFinite(left) || !Number.isFinite(right) || right <= left) return [];
+    const lineWidth = Math.max(1, right - left);
+
+    return entries.map((entry) => {
+      const spanLeft = entry.rect.left - lineRect.left;
+      const phaseSeconds = (Math.max(0, spanLeft - left) / lineWidth) * SHIMMER_SWEEP_SECONDS;
+      return {
+        span: entry.span,
+        phaseSeconds,
+      };
+    });
+  }
+
   function showLoadingIndicator(editorRoot) {
     hideLoadingIndicator();
     const anchor = editorRoot || document.querySelector('.monaco-editor');
     if (!anchor) return;
     const lines = [...anchor.querySelectorAll('.view-lines .view-line')];
-    loadingTargetLines = lines.filter((line) => hanRegex.test(line.textContent || ''));
-    if (!loadingTargetLines.length) {
-      loadingTargetLines = lines.filter((line) => (line.textContent || '').trim());
+    let targetLines = lines.filter((line) => hanRegex.test(line.textContent || ''));
+    if (!targetLines.length) {
+      targetLines = lines.filter((line) => (line.textContent || '').trim());
     }
-    const spans = loadingTargetLines.flatMap((line) => [...line.querySelectorAll('span')]);
-    loadingTargetSpans = spans.filter((span) => (span.textContent || '').trim());
-    loadingTargetLines.forEach((line) => line.classList.add('tst-translating-line'));
-    loadingTargetSpans.forEach((span) => span.classList.add('tst-translating-target'));
+    if (!targetLines.length) return;
+
+    loadingTargetLines = [];
+    loadingTargetSpans = [];
+    targetLines.forEach((line, index) => {
+      const shimmerSpans = collectLineShimmerSpans(line);
+      if (!shimmerSpans.length) return;
+      line.classList.add('tst-translating-line');
+      loadingTargetLines.push(line);
+      shimmerSpans.forEach(({ span, phaseSeconds }) => {
+        const palette = resolveSpanShimmerPalette(span);
+        span.classList.add('tst-translating-target');
+        span.style.setProperty('--tst-base-color', toRgbString(palette.base));
+        span.style.setProperty('--tst-mid-color', toRgbString(palette.mid));
+        span.style.setProperty('--tst-highlight-color', toRgbString(palette.highlight));
+        span.style.setProperty('--tst-glow-strong-color', palette.glowStrong);
+        span.style.setProperty('--tst-glow-soft-color', palette.glowSoft);
+        span.style.setProperty('--tst-shimmer-delay', `${index * -0.05}s`);
+        span.style.setProperty('--tst-sweep-phase', `${phaseSeconds}s`);
+        loadingTargetSpans.push(span);
+      });
+    });
+    if (!loadingTargetSpans.length) return;
+
     loadingEditorRoot = anchor;
-    loadingStartedAt = Date.now();
+    loadingStartedAt = performance.now();
   }
 
   function hideLoadingIndicator() {
-    if (!loadingEditorRoot) return;
+    loadingTargetSpans.forEach((span) => {
+      span.classList.remove('tst-translating-target');
+      span.style.removeProperty('--tst-base-color');
+      span.style.removeProperty('--tst-mid-color');
+      span.style.removeProperty('--tst-highlight-color');
+      span.style.removeProperty('--tst-glow-strong-color');
+      span.style.removeProperty('--tst-glow-soft-color');
+      span.style.removeProperty('--tst-shimmer-delay');
+      span.style.removeProperty('--tst-sweep-phase');
+    });
     loadingTargetLines.forEach((line) => line.classList.remove('tst-translating-line'));
-    loadingTargetSpans.forEach((span) => span.classList.remove('tst-translating-target'));
-    loadingTargetLines = [];
     loadingTargetSpans = [];
+    loadingTargetLines = [];
     loadingEditorRoot = null;
     loadingStartedAt = 0;
   }
@@ -62,17 +189,17 @@
   function applyTranslationResult(data) {
     inFlight = false;
     hideLoadingIndicator();
+    const targetFromRequest = pendingTranslationTarget;
+    pendingTranslationTarget = null;
 
     if (!data.ok || !data.text) return;
 
-    const target = resolveTarget();
-    if (!target) return;
+    if (applyTranslationToTarget(targetFromRequest, data.text)) return;
 
-    if (target.editor) {
-      tryReplaceEditorValue(target.editor, data.text);
-    } else if (target.model) {
-      target.model.setValue(data.text);
-    }
+    const fallbackTarget = resolveTarget();
+    if (applyTranslationToTarget(fallbackTarget, data.text)) return;
+
+    console.warn('[Triple Space Translate] failed to apply translation: no valid target');
   }
 
   (function injectLoadingStyles() {
@@ -81,60 +208,47 @@
       .tst-translating-line {
         position: relative;
       }
-      .tst-translating-line::after {
-        content: '';
-        position: absolute;
-        inset: 0;
-        pointer-events: none;
-        background-image: linear-gradient(
-          90deg,
-          rgba(0, 0, 0, 0) 43%,
-          rgba(0, 0, 0, 0.1) 48%,
-          rgba(255, 255, 255, 0.42) 50%,
-          rgba(0, 0, 0, 0.1) 52%,
-          rgba(0, 0, 0, 0) 57%
-        );
-        background-size: 240% 100%;
-        background-position: 150% 0;
-        background-repeat: no-repeat;
-        animation: tst-line-sweep 1.35s ease-in-out infinite;
-      }
       .tst-translating-target {
-        background-image:
-          linear-gradient(0deg, currentColor, currentColor),
-          linear-gradient(
-            90deg,
-            rgba(255, 255, 255, 0) 46%,
-            rgba(255, 255, 255, 1) 50%,
-            rgba(255, 255, 255, 0) 54%
-          );
-        background-size: 100% 100%, 320% 100%;
-        background-repeat: no-repeat;
-        background-position: 0 0, 170% 0;
-        -webkit-background-clip: text;
-        background-clip: text;
-        color: inherit !important;
-        -webkit-text-fill-color: transparent;
-        text-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
-        animation: tst-text-sweep 1.35s ease-in-out infinite;
-        will-change: background-position;
-      }
-      @keyframes tst-line-sweep {
-        0% { background-position: 150% 0; }
-        100% { background-position: -150% 0; }
+        --tst-base-color: currentColor;
+        --tst-mid-color: currentColor;
+        --tst-highlight-color: currentColor;
+        --tst-glow-strong-color: rgba(255, 255, 255, 0.45);
+        --tst-glow-soft-color: rgba(255, 255, 255, 0.2);
+        color: var(--tst-base-color) !important;
+        text-shadow: 0 0 0 transparent;
+        will-change: color, filter, text-shadow;
+        animation: tst-text-sweep ${SHIMMER_SWEEP_SECONDS}s linear infinite;
+        animation-delay: calc(var(--tst-shimmer-delay, 0s) - var(--tst-sweep-phase, 0s));
       }
       @keyframes tst-text-sweep {
-        0% { background-position: 0 0, 170% 0; }
-        100% { background-position: 0 0, -170% 0; }
+        0%,
+        34%,
+        100% {
+          color: var(--tst-base-color);
+          filter: brightness(1) saturate(1);
+          text-shadow: 0 0 0 transparent;
+        }
+        47% {
+          color: var(--tst-highlight-color);
+          filter: brightness(1.26) saturate(1.08);
+          text-shadow:
+            0 0 0.025em var(--tst-highlight-color),
+            0 0 0.5em var(--tst-glow-strong-color);
+        }
+        58% {
+          color: var(--tst-mid-color);
+          filter: brightness(1.12) saturate(1.03);
+          text-shadow:
+            0 0 0.018em var(--tst-mid-color),
+            0 0 0.24em var(--tst-glow-soft-color);
+        }
       }
       @media (prefers-reduced-motion: reduce) {
-        .tst-translating-line::after {
-          animation: none;
-          background-position: 0 0;
-        }
         .tst-translating-target {
           animation: none;
-          background-position: 0 0, 0 0;
+          color: var(--tst-base-color);
+          filter: none;
+          text-shadow: none;
         }
       }
     `;
@@ -159,7 +273,7 @@
     if (data.source !== SOURCE || data.type !== 'translation') return;
 
     clearLoadingSettleTimer();
-    const elapsed = loadingStartedAt ? Date.now() - loadingStartedAt : MIN_LOADING_MS;
+    const elapsed = loadingStartedAt ? performance.now() - loadingStartedAt : MIN_LOADING_MS;
     const waitMs = Math.max(0, MIN_LOADING_MS - elapsed);
     if (!waitMs) {
       applyTranslationResult(data);
@@ -179,6 +293,10 @@
     }
     clearLoadingSettleTimer();
     const target = resolveTarget(editorRoot);
+    if (!target) {
+      debug('skip: cannot resolve translation target');
+      return;
+    }
     const modelText = target?.model?.getValue() || '';
     const domText = editorRoot ? extractTextFromDom(editorRoot) : '';
     const text = pickBestText(modelText, domText).trimEnd();
@@ -187,6 +305,7 @@
       return;
     }
     inFlight = true;
+    pendingTranslationTarget = target;
     showLoadingIndicator(editorRoot);
     debug('translate request', { length: text.length });
     window.postMessage(
@@ -255,6 +374,11 @@
       if (!containerCandidate) containerCandidate = document.activeElement.closest('.monaco-editor-container');
     }
 
+    if (containerCandidate?.querySelector) {
+      const nestedRoot = containerCandidate.querySelector('.monaco-editor');
+      if (nestedRoot) return nestedRoot;
+    }
+
     return containerCandidate;
   }
 
@@ -312,12 +436,17 @@
   }
 
   function resolveTarget(editorRoot) {
-    if (activeEditor?.getModel) return { editor: activeEditor, model: activeEditor.getModel() };
-
     if (editorRoot) {
-      const entry = editorByNode.get(editorRoot);
+      const normalizedRoot = editorRoot.classList?.contains('monaco-editor')
+        ? editorRoot
+        : editorRoot.querySelector?.('.monaco-editor') || editorRoot;
+      const entry = editorByNode.get(normalizedRoot);
       if (entry) return { editor: entry.editor, model: entry.model };
+      const modelFromRoot = pickActiveModel(normalizedRoot);
+      if (modelFromRoot) return { editor: null, model: modelFromRoot };
     }
+
+    if (activeEditor?.getModel) return { editor: activeEditor, model: activeEditor.getModel() };
 
     const model = pickActiveModel(editorRoot);
     return model ? { editor: null, model } : null;
@@ -335,6 +464,27 @@
     } catch {
       editor.getModel()?.setValue(text);
     }
+  }
+
+  function applyTranslationToTarget(target, text) {
+    if (!target || !text) return false;
+    if (target.editor && typeof target.editor.getModel === 'function') {
+      try {
+        tryReplaceEditorValue(target.editor, text);
+        return true;
+      } catch {
+        // continue to model fallback
+      }
+    }
+    if (target.model && typeof target.model.setValue === 'function') {
+      try {
+        target.model.setValue(text);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    return false;
   }
 
   const hasEnoughChinese = (text) => text && hanRegex.test(text);
